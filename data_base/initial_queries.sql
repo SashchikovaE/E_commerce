@@ -20,9 +20,21 @@ ADD CONSTRAINT fk_product_category_name
 FOREIGN KEY (product_category_name)
 REFERENCES product_category_name_translation(product_category_name)
 
-=============================================================================
-Вычисляем, есть ли в таблице customers и sellers такие значения зип кода, которых нет в таблице geolocation
-=============================================================================
+===============================================================
+Проверяем, хранит ли в себе столбец geolocation_zip_code_prefix
+из таблицы olist_geolocation_dataset уникальные значения
+===============================================================
+
+SELECT
+    COUNT(*) AS total_rows,
+    COUNT(DISTINCT geolocation_zip_code_prefix) AS unique_values,
+    COUNT(*) - COUNT(DISTINCT geolocation_zip_code_prefix) AS duplicates_count
+FROM olist_geolocation_dataset;
+
+===========================================================================
+Вычисляем, есть ли в таблице customers и sellers такие значения зип кода,
+которых нет в таблице geolocation, и сколько их (278 customers и 7 sellers)
+===========================================================================
 
 SELECT COUNT(*) 
 FROM olist_customers_dataset c
@@ -36,67 +48,92 @@ LEFT JOIN olist_geolocation_dataset g
     ON s.seller_zip_code_prefix = g.geolocation_zip_code_prefix
 WHERE g.geolocation_zip_code_prefix IS NULL;
 
-==============================================================================
-Так как мы обнаружили, что есть такие экземпляры (278 и 7), мы должны записать данные в новую таблицу из всех трех
-==============================================================================
+===================================================================
+Создаем новую таблицу с данными из старой olist_geolocation_dataset
+и добавляем первичный ключ
+===================================================================
 
-CREATE TABLE zip_code(
-	zip_code_prefix VARCHAR(5) PRIMARY KEY
-);
-INSERT INTO zip_code (zip_code_prefix)
-SELECT DISTINCT geolocation_zip_code_prefix
+CREATE TABLE olist_zip_geo_dataset AS
+SELECT
+	geolocation_zip_code_prefix,
+	AVG(geolocation_lat) AS lat,
+	AVG(geolocation_lng) AS lng,
+	MAX(geolocation_city) AS city,
+	MAX(geolocation_state) AS geo_state
 FROM olist_geolocation_dataset
-WHERE geolocation_zip_code_prefix IS NOT NULL
-UNION
-SELECT DISTINCT customer_zip_code_prefix
-FROM olist_customers_dataset
-WHERE customer_zip_code_prefix IS NOT NULL
-UNION
-SELECT DISTINCT seller_zip_code_prefix
-FROM olist_sellers_dataset
-WHERE seller_zip_code_prefix IS NOT NULL
-ON CONFLICT (zip_code_prefix) DO NOTHING;
+GROUP BY geolocation_zip_code_prefix
 
-====================================================================================
-Обнаружила, что на автомате некоторые столбцы опредедлилсь типом данных integer, а так как значения этого столбца начинались с нулей, эти нули автоматически исчезли, поэтому нужно заполнить значения нулями спереди, где это необходимо и изменить тип данных на varchar
-====================================================================================
+ALTER TABLE olist_zip_geo_dataset
+ADD PRIMARY KEY (geolocation_zip_code_prefix)
 
-ALTER TABLE zip_code
-ADD COLUMN zip_code_prefix_new VARCHAR(5);
-UPDATE zip_code
-SET zip_code_prefix_new = LPAD(zip_code_prefix, 5, '0');
-ALTER TABLE zip_code
-DROP COLUMN zip_code_prefix;
-ALTER TABLE zip_code
-RENAME COLUMN zip_code_prefix_new TO zip_code_prefix;
+============================================================================
+Проверяем, какие вообще значения хранятся в зип кодах у customers и sellers,
+которых нет в главной таблице
+============================================================================
 
-ALTER TABLE olist_geolocation_dataset
-ADD COLUMN geolocation_zip_code_prefix_new VARCHAR(5);
-UPDATE olist_geolocation_dataset
-SET geolocation_zip_code_prefix_new = LPAD(geolocation_zip_code_prefix::TEXT, 5, '0');
-ALTER TABLE olist_geolocation_dataset
-DROP COLUMN geolocation_zip_code_prefix;
-ALTER TABLE olist_geolocation_dataset
-RENAME COLUMN geolocation_zip_code_prefix_new TO geolocation_zip_code_prefix;
+SELECT geolocation_zip_code_prefix
+FROM olist_zip_geo_dataset
+ORDER BY geolocation_zip_code_prefix
+DESC LIMIT 20;
+
+==================================================================
+Так как зип коды выглядят реалистично, то скорее всего, они просто
+не внесены в таблицу olist_zip_geo_dataset, исправим это
+==================================================================
+
+INSERT INTO olist_zip_geo_dataset (geolocation_zip_code_prefix, city, geo_state, lat, lng)
+SELECT DISTINCT
+    c.customer_zip_code_prefix,
+    c.customer_city,
+    c.customer_state,
+    (SELECT AVG(lat) FROM olist_zip_geo_dataset WHERE city = c.customer_city) AS avg_lat,
+    (SELECT AVG(lng) FROM olist_zip_geo_dataset WHERE city = c.customer_city) AS avg_lng
+FROM olist_customers_dataset c
+WHERE c.customer_zip_code_prefix NOT IN (
+    SELECT geolocation_zip_code_prefix
+    FROM olist_zip_geo_dataset
+);
+
+
+INSERT INTO olist_zip_geo_dataset (geolocation_zip_code_prefix, city, geo_state, lat, lng)
+SELECT DISTINCT
+    s.seller_zip_code_prefix,
+    s.seller_city,
+    s.seller_state,
+    (SELECT AVG(lat) FROM olist_zip_geo_dataset WHERE city = s.seller_city) AS avg_lat,
+    (SELECT AVG(lng) FROM olist_zip_geo_dataset WHERE city = s.seller_city) AS avg_lng
+FROM olist_sellers_dataset s
+WHERE s.seller_zip_code_prefix NOT IN (
+    SELECT geolocation_zip_code_prefix
+    FROM olist_zip_geo_dataset
+);
+
+============================================================================================
+Связываем таблицы customers и sellers с новой нормализованной таблицей olist_zip_geo_dataset
+============================================================================================
 
 ALTER TABLE olist_customers_dataset
-ADD COLUMN customer_zip_code_prefix_new VARCHAR(5);
-UPDATE olist_customers_dataset
-SET customer_zip_code_prefix_new = LPAD(customer_zip_code_prefix::TEXT, 5, '0');
-ALTER TABLE olist_customers_dataset
-DROP COLUMN customer_zip_code_prefix;
-ALTER TABLE olist_customers_dataset
-RENAME COLUMN customer_zip_code_prefix_new TO customer_zip_code_prefix;
-
+ADD CONSTRAINT fk_customer_zip_code_prefix
+FOREIGN KEY (customer_zip_code_prefix)
+REFERENCES olist_zip_geo_dataset(geolocation_zip_code_prefix);
 
 ALTER TABLE olist_sellers_dataset
-ADD COLUMN seller_zip_code_prefix_new VARCHAR(5);
-UPDATE olist_sellers_dataset
-SET seller_zip_code_prefix_new = LPAD(seller_zip_code_prefix::TEXT, 5, '0');
+ADD CONSTRAINT fk_seller_zip_code_prefix
+FOREIGN KEY (seller_zip_code_prefix)
+REFERENCES olist_zip_geo_dataset(geolocation_zip_code_prefix);
+
+========================================================================
+Удаляем лишние столбцы из таблиц customers и sellers, так как информация
+об этих столбцах уже есть в таблице olist_zip_geo_dataset
+========================================================================
+
+ALTER TABLE olist_customers_dataset
+DROP COLUMN IF EXISTS customer_city,
+DROP COLUMN IF EXISTS customer_state;
+
 ALTER TABLE olist_sellers_dataset
-DROP COLUMN seller_zip_code_prefix;
-ALTER TABLE olist_sellers_dataset
-RENAME COLUMN seller_zip_code_prefix_new TO seller_zip_code_prefix;
+DROP COLUMN IF EXISTS seller_city,
+DROP COLUMN IF EXISTS seller_state;
 
 ========================================
 Продолжаем менять типы данных в таблицах
@@ -114,31 +151,9 @@ MODIFY COLUMN order_delivered_customer_date TIMESTAMP,
 ALTER TABLE olist_orders_dataset
 MODIFY COLUMN order_estimated_delivery_date TIMESTAMP
 
-=======================================
-Продолжаем связывать оставшиеся таблицы
-=======================================
-
-ALTER TABLE zip_code
-ADD PRIMARY KEY (zip_code_prefix);
-
-ALTER TABLE olist_geolocation_dataset
-ADD CONSTRAINT fk_geolocation_zip_code_prefix
-FOREIGN KEY (geolocation_zip_code_prefix)
-REFERENCES zip_code(zip_code_prefix);
-
-ALTER TABLE olist_customers_dataset
-ADD CONSTRAINT fk_customer_zip_code_prefix
-FOREIGN KEY (customer_zip_code_prefix)
-REFERENCES zip_code(zip_code_prefix);
-
-ALTER TABLE olist_sellers_dataset
-ADD CONSTRAINT fk_seller_zip_code_prefix
-FOREIGN KEY (seller_zip_code_prefix)
-REFERENCES zip_code(zip_code_prefix)
-
-============
+==============================
 Заменяем пустые строки на NULL
-========================
+==============================
 
 UPDATE olist_orders_dataset
 SET order_purchase_timestamp = NULL
@@ -201,29 +216,51 @@ USING review_answer_timestamp::TIMESTAMP
 =============================================================
 
 CREATE VIEW orders_master AS
-SELECT
+SELECT 
+    o.order_id,
     c.customer_unique_id,
-    c.customer_city,
-    c.customer_state,
-    s.seller_city,
-    s.seller_state,
-    oi.price,
-    oi.freight_value,
-    p.product_category_name,
-    p.product_weight_g,
-    op.payment_type,
-    op.payment_installments,
-    op.payment_value,
+	zc.city AS customer_city,
+	zc.state AS customer_state,
+	zc.lat AS customer_lat,
+	zc.lng AS customer_lng,
     o.order_status,
     o.order_purchase_timestamp,
+    o.order_approved_at,
+    o.order_delivered_carrier_date,
     o.order_delivered_customer_date,
     o.order_estimated_delivery_date,
+    oi.order_item_id,
+    p.product_category_name,
+	p.product_name_lenght,
+	p.product_description_lenght,
+    p.product_weight_g,
+	p.product_length_cm,
+	p.product_height_cm,
+	p.product_width_cm,
+	zs.city AS seller_city,
+	zs.state AS seller_state,
+	zs.lat AS seller_lat,
+	zs.lng AS seller_lng,
+	oi.shipping_limit_date,
+    oi.price,
+    oi.freight_value,
+	op.payment_sequential,
+    op.payment_type,
+    op.payment_installments,
+    op.payment_value AS total_payment,
     ore.review_score,
-    ore.review_comment_message
+	ore.review_comment_title,
+    ore.review_comment_message,
+	ore.review_creation_date,
+	ore.review_answer_timestamp
 FROM olist_orders_dataset o
-LEFT JOIN olist_customers_dataset c USING(customer_id)
-LEFT JOIN olist_order_items_dataset oi USING(order_id)
-LEFT JOIN olist_products_dataset p USING(product_id)
-LEFT JOIN olist_order_payments_dataset op USING(order_id)
-LEFT JOIN olist_order_reviews_dataset ore USING(order_id)
-LEFT JOIN olist_sellers_dataset s USING(seller_id)
+LEFT JOIN olist_customers_dataset c ON o.customer_id = c.customer_id
+LEFT JOIN olist_order_items_dataset oi ON o.order_id = oi.order_id
+LEFT JOIN olist_products_dataset p ON oi.product_id = p.product_id
+LEFT JOIN olist_sellers_dataset s ON oi.seller_id = s.seller_id
+LEFT JOIN olist_order_payments_dataset op ON o.order_id = op.order_id
+LEFT JOIN olist_order_reviews_dataset ore ON o.order_id = ore.order_id
+LEFT JOIN olist_zip_geo_dataset zc ON c.customer_zip_code_prefix = zc.geolocation_zip_code_prefix
+LEFT JOIN olist_zip_geo_dataset zs ON s.seller_zip_code_prefix = zs.geolocation_zip_code_prefix
+
+
