@@ -71,7 +71,7 @@ class Preprocessor():
         self.df = self.df[self.df[customer_unique_id].isin(counts[counts >= customer_min_count].index)]
 
     def preprocess(self):
-        #self.analys_table()
-        #self.vizualize_histograms()
+        self.analys_table()
+        self.vizualize_histograms()
         self.check_outliers()
 
