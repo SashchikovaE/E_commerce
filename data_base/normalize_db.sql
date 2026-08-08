@@ -230,6 +230,7 @@ SELECT
     o.order_delivered_customer_date,
     o.order_estimated_delivery_date,
     oi.order_item_id,
+    p.product_id,
     p.product_category_name,
 	p.product_name_lenght,
 	p.product_description_lenght,
@@ -237,6 +238,7 @@ SELECT
 	p.product_length_cm,
 	p.product_height_cm,
 	p.product_width_cm,
+	s.seller_id,
 	zs.city AS seller_city,
 	zs.geo_state AS seller_state,
 	zs.lat AS seller_lat,
@@ -262,5 +264,4 @@ LEFT JOIN olist_order_payments_dataset op ON o.order_id = op.order_id
 LEFT JOIN olist_order_reviews_dataset ore ON o.order_id = ore.order_id
 LEFT JOIN olist_zip_geo_dataset zc ON c.customer_zip_code_prefix = zc.geolocation_zip_code_prefix
 LEFT JOIN olist_zip_geo_dataset zs ON s.seller_zip_code_prefix = zs.geolocation_zip_code_prefix
-
 
