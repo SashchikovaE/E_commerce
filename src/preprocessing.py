@@ -28,22 +28,6 @@ class Preprocessor():
         pd.set_option("display.width", None)
         print(self.df)
 
-    def vizualize_histograms(self):
-        count_category = self.df.groupby('product_category_name')['customer_unique_id'].count()
-        count_customer = self.df.groupby('customer_unique_id')['product_category_name'].count()
-        sns.histplot(count_customer)
-        plt.title('Distribution of category')
-        plt.savefig(Path(__file__).parent.parent / 'images/category_distribution.png')
-        plt.show()
-        sns.histplot(count_category)
-        plt.title('Distribution of customers')
-        plt.savefig(Path(__file__).parent.parent / 'images/customers_distribution.png')
-        plt.show()
-        self.df['review_score'].hist()
-        plt.title('Distribution of Review Scores')
-        plt.savefig(Path(__file__).parent.parent / 'images/review_score_distribution.png')
-        plt.show()
-
     def check_omissions(self):
         print(self.df.isna().sum())
 
