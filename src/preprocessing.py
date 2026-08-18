@@ -31,9 +31,8 @@ class Preprocessor():
         print(self.df['product_description_length'].nunique())
 
     def check_order_status(self):
+        '''посмотреть, что означают эти статусы (canceled - оплата не прошла, unavailable - товары не достпуны'''
         pd.set_option("display.width", None)
-        # чекнуть че такое кэнслд (чювак не оплатил)
-        # unavailable это тупа удаленные
         print(self.df[self.df['order_status'] == 'canceled'])
         print(self.df[self.df['order_status'] == 'unavailable'])
 
@@ -312,8 +311,6 @@ class Preprocessor():
             avg_seller_delay=('seller_delay', 'mean'),
 
             #review
-            #avg_delivery_review_time=('delivery_review_time', 'mean'),
-            #review_to_answer_time_h=('review_to_answer_time_h', 'first'),
             review_score=('review_score', 'first'),
             )
         order_level['bad_review'] = (order_level['review_score'] < 4).astype(int)
